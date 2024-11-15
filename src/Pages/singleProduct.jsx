@@ -8,27 +8,132 @@ export function SingleProduct() {
   const [productData, setProductData] = useState(null);
   const [mainImage, setMainImage] = useState("");
   const [inCart, setInCart] = useState(false);
+  const [variations, setVariations] = useState([]);
+  const [skusWithVariations, setskusWithVariations] = useState([])
+  const [selectedVariations, setSelectedVariations] = useState({});
+  const [selectedSkuId, setSelectedSkuId] = useState(id);
+
+  const loadVariations = async (id) => {
+    try {
+      const response = await axios.get(
+        `${process.env.REACT_APP_API}/api/v1/customer/variation-by-product-id/${id}`
+      );
+      const { data } = response;
+      if (data.success) {
+        setVariations(data.data);
+        return data.data
+      }
+    } catch (error) {
+      console.error("Error fetching product variations:", error);
+    }
+  };
+
+
+  const loadSkusWithVariations = async (id) => {
+    try {
+      const response = await axios.get(
+        `${process.env.REACT_APP_API}/api/v1/customer/skus-variation-by-product-id/${id}`
+      );
+      const { data } = response;
+      if (data.success) {
+        setskusWithVariations(data.data);
+        return data.data
+      }
+    } catch (error) {
+      console.error(
+        "Error fetching product skus with variations:",
+        error
+      );
+    }
+  };
+
+
+  //fetch all the product details including varition and skusvariations
+  const fetchProductData = async (id) => {
+    try {
+      const response = await axios.get(
+        `${process.env.REACT_APP_API}/api/v1/customer/product-sku/${id}`
+      );
+      const data = response.data.data;
+      setProductData(data);
+
+      // Set main image to the first image in the Images array
+      setMainImage(data.Images[0]?.M07_image_path || data.M06_thumbnail_image);
+
+      // Check if the product is already in local storage
+      const storedProducts = JSON.parse(localStorage.getItem("purchasedProducts")) || [];
+      setInCart(storedProducts.some((product) => product.id === data._id));
+
+      // Fetch product data from the API
+      const [variations, skusWithVariations] = await Promise.all([loadVariations(response.data.data.M06_M05_product_id), loadSkusWithVariations(response.data.data.M06_M05_product_id)]);
+
+      if (variations && skusWithVariations) {
+        const selectedVariations= initializeSelectedVariations(data,variations);
+        const selectedSkuId = findSkuId(skusWithVariations,selectedVariations)
+        console.log(selectedSkuId)
+        setSelectedSkuId(selectedSkuId);}
+
+    } catch (error) {
+      console.error("Error fetching product data:", error);
+    }
+  };
+
+  const handleVariationChange = (variationId, optionId) => {
+
+    const selectedVariationsI = {
+      ...selectedVariations,
+      [variationId]: optionId,
+    };
+    setSelectedVariations(selectedVariationsI);
+    const skuId = findSkuId(skusWithVariations, selectedVariationsI);
+    setSelectedSkuId(skuId);
+  };
+
+
+  //find sku id from variations
+  const findSkuId = (skusWithVariations,selectedVariations) => {
+    const matchingSku = skusWithVariations.find((sku) =>
+      sku.variations.every(
+        (v) =>
+          selectedVariations[v._id] &&
+          selectedVariations[v._id] === v.options._id
+      )
+    );
+    return matchingSku ? matchingSku.skuId : null;
+  };
+
+  const initializeSelectedVariations = (productData, variations) => {
+    const defaultSelections = {};
+  
+    // Use variations from the productData first
+    if (productData?.Variations?.length > 0) {
+      productData.Variations.forEach((productVariation) => {
+        defaultSelections[productVariation.M10_M08_product_variation_id] =
+          productVariation.M10_M09_variation_option_id; // Set the selected option for each variation
+      });
+    }
+  
+    // Fill in any missing variations with the first available option from the variations array
+    variations.forEach((variation) => {
+      if (!defaultSelections[variation._id] && variation.options?.length > 0) {
+        defaultSelections[variation._id] = variation.options[0]._id; // Select the first option by default
+      }
+    });
+  
+    setSelectedVariations(defaultSelections);
+    return defaultSelections;
+  };
+
+
+
+
+
+  
 
   useEffect(() => {
-    // Fetch product data from the API
-    axios
-      .get(
-        `${process.env.REACT_APP_API}/api/v1/customer/product-sku/${id}`
-      )
-      .then((response) => {
-        const data = response.data.data;
-        setProductData(data);
-        // Set main image to the first image in the Images array
-        setMainImage(
-          data.Images[0]?.M07_image_path || data.M06_thumbnail_image
-        );
-        // Check if the product is already in local storage
-        const storedProducts =
-          JSON.parse(localStorage.getItem("purchasedProducts")) || [];
-        setInCart(storedProducts.some((product) => product.id === data._id));
-      })
-      .catch((error) => console.error("Error fetching product data:", error));
-  }, [id]);
+    fetchProductData(selectedSkuId)
+
+  }, [selectedSkuId]);
 
   const handleAddToCart = () => {
     const storedProducts =
@@ -90,11 +195,10 @@ export function SingleProduct() {
                 key={image._id}
                 src={image.M07_image_path}
                 alt={`Thumbnail ${index + 1}`}
-                className={`w-16 h-16 object-cover cursor-pointer ${
-                  mainImage === image.M07_image_path
-                    ? "ring-1 ring-[#004F44]"
-                    : ""
-                }`}
+                className={`w-16 h-16 object-cover cursor-pointer ${mainImage === image.M07_image_path
+                  ? "ring-1 ring-[#004F44]"
+                  : ""
+                  }`}
                 onClick={() => setMainImage(image.M07_image_path)}
               />
             ))}
@@ -131,12 +235,13 @@ export function SingleProduct() {
           </div>
 
           {/* Variations */}
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <h4 className="text-lg font-semibold">Color:</h4>
             <div className="flex space-x-2">
               {productData.Variations.filter(
                 (variation) => variation.M08_name === "Color"
               ).map((variation) => (
+                
                 <span
                   key={variation._id}
                   className="w-8 h-8 rounded-full border border-gray-300"
@@ -144,12 +249,12 @@ export function SingleProduct() {
                 />
               ))}
             </div>
-          </div>
+          </div> */}
 
           <div className="space-y-2">
-            <h4 className="text-lg font-semibold">Size:</h4>
+            {/* <h4 className="text-lg font-semibold">Size:</h4> */}
             <div className="flex space-x-2">
-              {productData.Variations.filter(
+              {/* {productData.Variations.filter(
                 (variation) => variation.M08_name === "Size"
               ).map((variation) => (
                 <button
@@ -158,6 +263,27 @@ export function SingleProduct() {
                 >
                   {variation.M09_name}
                 </button>
+              ))} */}
+
+              {variations.map((variation) => (
+                <div key={variation._id}>
+                  <h3>{variation.M08_name}</h3>
+                  <div className="flex space-x-2">
+                    {variation.options.map((option) => (
+                      <button
+                        key={option._id}
+                        className={`
+                          w-10 h-10 border border-gray-300 rounded
+                          ${selectedVariations[variation._id] === option._id ? "bg-[#004F44] text-white" : ""}
+                          `}
+
+                        onClick={() => handleVariationChange(variation._id, option._id)}
+                      >
+                        {option.M09_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
